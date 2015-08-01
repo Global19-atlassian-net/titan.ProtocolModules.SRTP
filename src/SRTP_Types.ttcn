@@ -1,0 +1,274 @@
+/******************************************************************************
+* Copyright (c) 2005, 2015  Ericsson AB
+* All rights reserved. This program and the accompanying materials
+* are made available under the terms of the Eclipse Public License v1.0
+* which accompanies this distribution, and is available at
+* http://www.eclipse.org/legal/epl-v10.html
+*
+* Contributors:
+* Gabor Szalai
+******************************************************************************/
+//
+//  File:               SRTP_Types.ttcn
+//  Description:        
+//  Rev:                R2A
+//  Prodnr:             CNL 113 769/1
+//  Reference:          IETF RFC 3711
+//
+//
+module SRTP_Types {
+  import from RTP_Types all;
+  import from General_Types all;
+  
+  // If set true, the encoder/decoder functions log some information
+  // usefull for debug. The "DEBUG" flag should be added to the
+  // FileMask in the run time config file also.
+  modulepar boolean tsp_SRTP_debug_log_enabled:=false
+
+  // Templates to initialize the cryptographic context
+  
+  // Initialises the master key parameter record
+  template SRTP_master_key_params t_SRTP_init_master_key(
+      octetstring           pl_master_key,
+      template octetstring  pl_master_salt:= omit,
+      integer               pl_key_derivation_rate:=0
+    ):={
+    master_key := pl_master_key,
+    processed_packets_srtp:=0, 
+    processed_packets_srtcp:=0,
+    master_salt:=pl_master_salt,
+    key_derivation_rate:=pl_key_derivation_rate,
+    mki_value:=omit,
+    valid_from_to:=omit,
+    srtp_session_encr_key:=omit,
+    srtp_session_auth_key:=omit,
+    srtp_session_salt_key:=omit,
+    srtcp_session_encr_key:=omit,
+    srtcp_session_auth_key:=omit,
+    srtcp_session_salt_key:=omit
+  }
+
+  // Initialization template for crypto context
+  template SRTP_crypto_context_params t_SRTP_init_crypto_context(
+     SRTP_crypto_transform  pl_crypto_param,
+     SRTP_auth_transform    pl_auth_param,
+     SRTP_master_key_list   pl_master_key_list
+    ) :={
+    roc := 0,
+    s_l := 0,
+    srtcp_index := 0,
+    crypto_param := pl_crypto_param,
+    auth_param := pl_auth_param,
+    mki_length := 0,  // No MKI
+    mki_value  := ''O,
+    key_index  :=0,
+    master_key_list := pl_master_key_list,
+    replay_listsrtp := omit,
+    replay_listsrtcp := omit,
+    contexid := omit,
+    additional_param_list:=omit
+  }
+  
+  // Encoder, decoder functions
+  
+  // Encodes the  SRTP packet according to the crypto context.
+  // Calculates and updates the derived keys if needed.
+  // Updates the ROC, processed packets counters
+  external function f_SRTP_encoder(
+    in RTP_messages_union pl_pdu,
+    inout  SRTP_crypto_context_params pl_context,
+    out octetstring pl_packet
+    );
+
+  // Decodes the  SRTP packet according to the crypto context.
+  // Calculates and updates the derived keys if needed.
+  // Updates the ROC, processed packets counters
+  external function f_SRTP_decoder(
+    in octetstring pl_packet,
+    inout  SRTP_crypto_context_params pl_context,
+    out RTP_messages_union pl_pdu
+    ) return SRTP_result;
+    
+  // Type definitions for SRTP
+  
+  // Result of the SRTP decoding
+  type enumerated SRTP_result { 
+    SRTP_OK,                  // Everithing was OK
+    SRTP_AUTH_FAIL,           // The Authentication failed
+    SRTP_MALFORMED_PACKET     // Malformed packet has been received
+  }
+  
+  // The crypto_contexparams is based on the 3.2. SRTP Cryptographic Contexts
+  // chapter of the RFC3711. The meaning and usage of each field is based
+  // on the RFC3711.
+  
+  type record SRTP_crypto_context_params{
+    integer   roc, // The ROC (rollover counter), set at the initialization
+                   // automatically updated by the necoder/decoder when needed
+                   
+    integer   s_l, // Used by both the encoder and thedecoder,
+                   // can be specified at init
+                   // a 16-bit sequence number s_l, which can be
+                   // thought of as the highest received RTP sequence number
+    integer srtcp_index, // The index of the srtcp packet. The counter used
+                   // by the encoder.
+
+
+    SRTP_crypto_transform   crypto_param, // The used encryption algorithm
+                                            // and its parameters
+
+    SRTP_auth_transform     auth_param, // The used authentication algorithm
+                                          // and its parameters
+    integer   mki_length,  // The MKI indicator and length, if zero - no MKI
+                           // if non-zero positive value - the length 
+                           // (in octets) of the MKI
+    octetstring   mki_value,   // the actual MKI value, used if mki_length > 0
+                          // The type of actual value is not specified in the RFC
+                          // so store as octestring
+    
+    integer key_index,    // The index of the recently used key in the list
+                          // Used to speed up the key selection if more than one 
+                          // key present.
+    
+    SRTP_master_key_list    master_key_list, // The list of the master keys
+                                               // and its parameters
+    
+    // Session key lengths are determined by the crypto and auth transforms
+    // not stored here
+    
+    Integers  replay_listsrtp  optional, // list of already received packets,
+                           // NOT used by thedecoder! The test code should
+                           // update the contentsof it if needed.
+    Integers  replay_listsrtcp  optional, 
+
+    SRTP_conetxt_params    contexid optional, // placeholder of the context
+                           // identifier parameters, NOT used by the encoder!
+                           // The test case can use other information to
+                           // identify the context, for example the connID 
+  
+    SRTP_additional_param_list  additional_param_list optional // room for
+                           // additional parameters. Currently no such params
+  }
+
+  type union SRTP_additional_param{
+    SRTP_NULL   nothing // Currently no additional parameters are defined
+                        // just add them here if more needed.
+  }
+
+  type record of SRTP_additional_param SRTP_additional_param_list
+
+
+  // Placeholder of cryptographic context identifier aacording to 
+  // the 3.2.3 chapter of the RFC3711
+  //     A cryptographic context SHALL be uniquely identified by the triplet
+  //    context identifier:
+  //    context id = <SSRC, destination network address, destination
+  //    transport port number>
+  //    where the destination network address and the destination transport
+  //    port are the ones in the SRTP packet. 
+
+  type record SRTP_conetxt_params {
+    BIT32_BO_LAST  SSRC,
+    charstring     destination_address,
+    integer        destination_port
+  }
+
+  
+  // Palceholder of master key parameters. See 3.2.1 of RFC3711
+  type record SRTP_master_key_params{
+    octetstring    master_key,  // the master key
+    integer        processed_packets_srtp, // for each master key, there is a 
+                               // counter of the number of SRTP
+                               // packets that have been processed (sent) with 
+                               // that master key. Updated by the encoder/decoder
+    integer        processed_packets_srtcp, 
+    
+    
+   // In addition, for each master key, an SRTP stream MAY use the
+   // following associated values:
+   // If present the value of them are used according to the RFC3711
+    octetstring    master_salt optional,
+    integer        key_derivation_rate optional,
+    octetstring    mki_value optional,
+    SRTP_from_to valid_from_to optional,
+    
+    // The actually used session keys, updated automatically as described
+    // 4.3 Key Derivation RFC3711
+    // DO NOT MODIFY THEM
+    octetstring srtp_session_encr_key optional,
+    octetstring srtp_session_auth_key optional,
+    octetstring srtp_session_salt_key optional,
+    octetstring srtcp_session_encr_key optional,
+    octetstring srtcp_session_auth_key optional,
+    octetstring srtcp_session_salt_key optional
+  }
+
+  type record of SRTP_master_key_params SRTP_master_key_list;
+  
+  // Holder of <From,To> pair for master key. See 3.2.1 and 8.1.1
+
+  type record SRTP_from_to{
+    integer   from_value,
+    integer   to_value
+  }
+
+  // Empty record to define NULL Cipher, no authentication ....
+  type record SRTP_NULL {}
+  
+  // Defines the used Message Authentication and Integrity
+  // Can be extended later
+  type union SRTP_auth_transform{
+    SRTP_NULL       no_auth,   // No authentication is used
+    SRTP_HMAC_SHA1  hmac_sha1, // HMAC-SHA1
+    SRTP_RCC        rccm1,     // RFC4771 RCC mode 1
+    SRTP_RCC        rccm2,     // RFC4771 RCC mode 1
+    SRTP_RCC        rccm3      // RFC4771 RCC mode 1
+  }
+  
+  // Message Authentication and Integrity HMAC-SHA1
+  type record SRTP_HMAC_SHA1{
+    integer   n_tag optional, // n_tag is the bit-length of the output
+                     // authentication tag, the default value is used if omited
+                     // 80 bit by default
+    integer   n_a optional  // the session authentication key length, 
+                    // the default value is 160
+  }
+
+   // Message Authentication and Integrity for RFC4771 RCC mode
+  type record SRTP_RCC {
+    integer   n_tag optional, // n_tag is the bit-length of the output
+                     // authentication tag, the default value is used if omited
+                     // RCC mode 1 & 2: 80 bit
+                     // RCC mode 3: 32 bit, other values are ignored for SRTP
+    integer   n_a optional,  // the session authentication key length, 
+                    // the default value is 160
+    integer   roc_r // ROC refresh rate.
+  }
+ 
+  // Encryptions. See 4.1 RFC3711
+  
+  // Defines the used encription
+  // Can be extended later
+  type union SRTP_crypto_transform {
+    SRTP_NULL       null_transform,    
+    SRTP_AES_CM     aes_cm,
+    SRTP_AES_F8     aes_f8
+  }
+
+  // parameters for AES CM
+  type record SRTP_AES_CM {
+    integer    n_e optional,  // Session encryption key length
+                 // the dafault value is 128
+    integer    n_s optional   // Session salt key length
+                 // the dafault value is 112
+  }
+
+  // parameters for AES f8
+  type record SRTP_AES_F8 {
+    integer    n_e optional,  // Session encryption key length
+                 // the dafault value is 128
+    integer    n_s optional   // Session salt key length
+                 // the dafault value is 112
+  }
+
+}
